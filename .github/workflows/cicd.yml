@@ -15,6 +15,9 @@ on:
         - staging
         - prod
 
+env:
+  NAMESPACE: ${{ github.event.inputs.environment || 'dev' }}
+
 jobs:
   build:
     runs-on: self-hosted
@@ -120,10 +123,9 @@ jobs:
 
       - name: Set Namespace
         run: |
-          NAMESPACE="${{ github.event.inputs.environment || 'dev' }}"
-          echo "Using namespace: $NAMESPACE"
-          kubectl create namespace $NAMESPACE || true
-          kubectl config set-context --current --namespace=$NAMESPACE
+          echo "Using namespace: ${{ env.NAMESPACE }}"
+          kubectl create namespace ${{ env.NAMESPACE }} || true
+          kubectl config set-context --current --namespace=${{ env.NAMESPACE }}
 
       - name: Deploy Canary Version
         working-directory: gudlyf-task1-deploy
@@ -169,20 +171,25 @@ jobs:
 
       - name: Set Namespace
         run: |
-          NAMESPACE="${{ github.event.inputs.environment || 'dev' }}"
-          echo "Using namespace: $NAMESPACE"
-          kubectl config set-context --current --namespace=$NAMESPACE
+          echo "Using namespace: ${{ env.NAMESPACE }}"
+          kubectl config set-context --current --namespace=${{ env.NAMESPACE }}
 
       - name: Promote to Production
         working-directory: gudlyf-task1-deploy
         run: |
           echo "Canary deployment successful, promoting to production"
-          if [ -f k8s/production-deployment.yml ]; then
+          if [ -f k8s/deployment.yml ]; then
+            kubectl apply -f k8s/deployment.yml
+          elif [ -f k8s/deployment.yaml ]; then
+            kubectl apply -f k8s/deployment.yaml
+          elif [ -f k8s/production-deployment.yml ]; then
             kubectl apply -f k8s/production-deployment.yml
           elif [ -f k8s/production-deployment.yaml ]; then
             kubectl apply -f k8s/production-deployment.yaml
           else
-            echo "Error: Neither k8s/production-deployment.yml nor k8s/production-deployment.yaml found"
+            echo "Error: No production deployment file found"
+            echo "Searched for: deployment.yml, deployment.yaml, production-deployment.yml, production-deployment.yaml"
+            ls -la k8s/
             exit 1
           fi
 
