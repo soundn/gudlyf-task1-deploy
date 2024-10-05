@@ -119,6 +119,7 @@ jobs:
 
       - name: Deploy Canary Version
         run: |
+          git clone https://github.com/soundn/gudlyf-task1-deploy.git
           cd gudlyf-task1-deploy
           kubectl apply -f k8s/canary-deployment.yaml
 
