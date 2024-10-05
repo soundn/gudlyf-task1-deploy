@@ -207,9 +207,14 @@ jobs:
 
       - name: Monitor Production Deployment
         run: |
-          PROD_DEPLOYMENT=$(kubectl get deployments -o jsonpath='{.items[*].metadata.name}' | grep -o '\bboardgame-deployment\b')
-          if [ -z "$PROD_DEPLOYMENT" ]; then
-            echo "Error: Production deployment not found"
+          echo "Listing all deployments in the namespace:"
+          kubectl get deployments
+          
+          echo "Waiting for deployment to be ready..."
+          kubectl wait --for=condition=available --timeout=300s deployment/boardgame-deployment || {
+            echo "Error: Production deployment failed to become ready"
+            kubectl describe deployment boardgame-deployment
             exit 1
-          fi
-          kubectl rollout status deployment/$PROD_DEPLOYMENT --timeout=5m
+          }
+          
+          echo "Deployment is ready"
