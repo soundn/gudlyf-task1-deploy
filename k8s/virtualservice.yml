@@ -1,0 +1,26 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: boardgame-virtualservice
+spec:
+  hosts:
+    - "*"
+  gateways:
+    - boardgame-gateway
+  http:
+    - match:
+        - uri:
+            prefix: / # Routing based on URI path
+      route:
+        - destination:
+            host: boardgame-service # Primary service
+            subset: stable
+            port:
+              number: 8080
+          weight: 90 # 90% traffic to stable version
+        - destination:
+            host: boardgame-service
+            subset: canary
+            port:
+              number: 8080
+          weight: 10 # 10% traffic to canary version

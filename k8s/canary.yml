@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: boardgame-deployment-canary
+  labels:
+    app: kentestgame
+    version: canary
+spec:
+  replicas: 1 # Canary replicas for testing
+  selector:
+    matchLabels:
+      app: kentestgame
+      version: canary
+  template:
+    metadata:
+      labels:
+        app: kentestgame
+        version: canary
+    spec:
+      containers:
+        - name: boardgame
+          image: soundnw/testapp:latest # Canary version using the same image for testing
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20

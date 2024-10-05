@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: boardgame-deployment
+  labels:
+    app: kentestgame
+spec:
+  replicas: 2 # Number of replicas
+  selector:
+    matchLabels:
+      app: kentestgame
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: kentestgame
+    spec:
+      containers:
+        - name: boardgame
+          image: soundnw/testapp:latest # Docker image
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080 # Exposed container port
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
