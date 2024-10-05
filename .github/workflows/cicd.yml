@@ -80,6 +80,9 @@ jobs:
         run: |
           docker push soundnw/testapp:latest
 
+      - name: Checkout code
+        uses: actions/checkout@v3    
+
       # Deploy to Kubernetes and handle Canary deployment
       - name: Deploy to Kubernetes (Canary Deployment)
         uses: tale/kubectl-action@v1
