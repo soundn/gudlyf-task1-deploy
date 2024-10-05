@@ -94,16 +94,6 @@ jobs:
         run: |
           docker push soundnw/testapp:latest
 
-      - name: Configure AWS credentials
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: eu-north-1  # Adjust to your region
-        run: |
-          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
-          aws configure set default.region $AWS_DEFAULT_REGION
-
       - name: Deploy to Kubernetes (Canary Deployment)
         uses: tale/kubectl-action@v1
         with:
@@ -121,11 +111,6 @@ jobs:
           kubectl create namespace $NAMESPACE || true
           kubectl config set-context --current --namespace=$NAMESPACE
 
-      - name: Debug - Print current directory
-        run: |
-          pwd
-          ls -la
-
       - name: Checkout deployment repository
         uses: actions/checkout@v3
         with:
@@ -142,27 +127,45 @@ jobs:
       - name: Deploy Canary Version
         working-directory: gudlyf-task1-deploy
         run: |
-          if [ -f k8s/canary-deployment.yaml ]; then
+          if [ -f k8s/canary-deployment.yml ]; then
+            kubectl apply -f k8s/canary-deployment.yml
+          elif [ -f k8s/canary-deployment.yaml ]; then
             kubectl apply -f k8s/canary-deployment.yaml
           else
-            echo "Error: k8s/canary-deployment.yaml not found"
+            echo "Error: Neither k8s/canary-deployment.yml nor k8s/canary-deployment.yaml found"
             exit 1
           fi
 
       - name: Monitor Canary Deployment
         run: |
-          kubectl rollout status deployment/canary-deployment --timeout=5m
+          kubectl get deployments
+          CANARY_DEPLOYMENT=$(kubectl get deployments -o jsonpath='{.items[*].metadata.name}' | grep -o '\bcanary-[^ ]*')
+          if [ -z "$CANARY_DEPLOYMENT" ]; then
+            echo "Error: Canary deployment not found"
+            exit 1
+          fi
+          kubectl rollout status deployment/$CANARY_DEPLOYMENT --timeout=5m
 
       - name: Check Deployment Status
         id: deployment-status
         run: |
-          kubectl get deployment canary-deployment -o json | jq '.status.conditions[] | select(.type=="Available").status' | grep True || exit 1
+          CANARY_DEPLOYMENT=$(kubectl get deployments -o jsonpath='{.items[*].metadata.name}' | grep -o '\bcanary-[^ ]*')
+          if [ -z "$CANARY_DEPLOYMENT" ]; then
+            echo "Error: Canary deployment not found"
+            exit 1
+          fi
+          kubectl get deployment $CANARY_DEPLOYMENT -o json | jq '.status.conditions[] | select(.type=="Available").status' | grep True || exit 1
 
       - name: Rollback on Failure
         if: failure()
         run: |
           echo "Rolling back due to failed canary deployment"
-          kubectl rollout undo deployment/canary-deployment
+          CANARY_DEPLOYMENT=$(kubectl get deployments -o jsonpath='{.items[*].metadata.name}' | grep -o '\bcanary-[^ ]*')
+          if [ -n "$CANARY_DEPLOYMENT" ]; then
+            kubectl rollout undo deployment/$CANARY_DEPLOYMENT
+          else
+            echo "Error: Canary deployment not found, unable to rollback"
+          fi
           exit 1
 
       - name: Promote to Production
@@ -170,9 +173,23 @@ jobs:
         working-directory: gudlyf-task1-deploy
         run: |
           echo "Canary deployment successful, promoting to production"
-          kubectl apply -f k8s/production-deployment.yaml
+          if [ -f k8s/production-deployment.yml ]; then
+            kubectl apply -f k8s/production-deployment.yml
+          elif [ -f k8s/production-deployment.yaml ]; then
+            kubectl apply -f k8s/production-deployment.yaml
+          else
+            echo "Error: Neither k8s/production-deployment.yml nor k8s/production-deployment.yaml found"
+            exit 1
+          fi
 
       - name: Deploy Services
         working-directory: gudlyf-task1-deploy
         run: |
-          kubectl apply -f k8s/service.yaml
+          if [ -f k8s/service.yml ]; then
+            kubectl apply -f k8s/service.yml
+          elif [ -f k8s/service.yaml ]; then
+            kubectl apply -f k8s/service.yaml
+          else
+            echo "Error: Neither k8s/service.yml nor k8s/service.yaml found"
+            exit 1
+          fi
