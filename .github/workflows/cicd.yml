@@ -18,23 +18,12 @@ on:
 jobs:
   build:
     runs-on: self-hosted
-
     steps:
-      - name: Clean workspace
-        run: |
-          sudo rm -rf $GITHUB_WORKSPACE/*
-          sudo rm -rf $GITHUB_WORKSPACE/.[!.]*
-
       - name: Checkout code
         uses: actions/checkout@v3
         with:
           clean: true
           fetch-depth: 0
-
-      - name: Set correct permissions
-        run: |
-          sudo chown -R $USER:$USER $GITHUB_WORKSPACE
-          sudo chmod -R 755 $GITHUB_WORKSPACE
 
       - name: Set up JDK 17
         uses: actions/setup-java@v3
@@ -51,6 +40,13 @@ jobs:
         with:
           name: Boardgame
           path: target/*.jar
+
+  test:
+    needs: build
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Trivy FS Scan
         run: |
@@ -69,6 +65,13 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+  build_and_push_docker:
+    needs: test
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -94,15 +97,20 @@ jobs:
         run: |
           docker push soundnw/testapp:latest
 
+  canary_deployment:
+    needs: build_and_push_docker
+    runs-on: self-hosted
+    steps:
+      - name: Checkout deployment repository
+        uses: actions/checkout@v3
+        with:
+          repository: soundn/gudlyf-task1-deploy
+          path: gudlyf-task1-deploy
+
       - name: Deploy to Kubernetes (Canary Deployment)
         uses: tale/kubectl-action@v1
         with:
           base64-kube-config: ${{ secrets.KUBE_CONFIG }}
-
-      - name: Verify kubectl configuration
-        run: |
-          kubectl config view
-          kubectl get nodes
 
       - name: Set Namespace
         run: |
@@ -110,19 +118,6 @@ jobs:
           echo "Using namespace: $NAMESPACE"
           kubectl create namespace $NAMESPACE || true
           kubectl config set-context --current --namespace=$NAMESPACE
-
-      - name: Checkout deployment repository
-        uses: actions/checkout@v3
-        with:
-          repository: soundn/gudlyf-task1-deploy
-          path: gudlyf-task1-deploy
-
-      - name: Debug - List deployment repository contents
-        run: |
-          cd gudlyf-task1-deploy
-          pwd
-          ls -la
-          ls -la k8s || echo "k8s directory not found"
 
       - name: Deploy Canary Version
         working-directory: gudlyf-task1-deploy
@@ -139,37 +134,40 @@ jobs:
       - name: Monitor Canary Deployment
         run: |
           kubectl get deployments
-          CANARY_DEPLOYMENT=$(kubectl get deployments -o jsonpath='{.items[*].metadata.name}' | grep -o '\bcanary-[^ ]*')
+          CANARY_DEPLOYMENT=$(kubectl get deployments -o jsonpath='{.items[*].metadata.name}' | grep -o '\bboardgame-deployment-canary\b')
           if [ -z "$CANARY_DEPLOYMENT" ]; then
             echo "Error: Canary deployment not found"
             exit 1
           fi
-          kubectl rollout status deployment/$CANARY_DEPLOYMENT --timeout=5m
-
-      - name: Check Deployment Status
-        id: deployment-status
-        run: |
-          CANARY_DEPLOYMENT=$(kubectl get deployments -o jsonpath='{.items[*].metadata.name}' | grep -o '\bcanary-[^ ]*')
-          if [ -z "$CANARY_DEPLOYMENT" ]; then
-            echo "Error: Canary deployment not found"
+          kubectl rollout status deployment/$CANARY_DEPLOYMENT --timeout=5m || true
+          READY=$(kubectl get deployment $CANARY_DEPLOYMENT -o jsonpath='{.status.readyReplicas}')
+          if [ "$READY" -eq "0" ]; then
+            echo "Error: Canary deployment failed to become ready"
             exit 1
           fi
-          kubectl get deployment $CANARY_DEPLOYMENT -o json | jq '.status.conditions[] | select(.type=="Available").status' | grep True || exit 1
 
-      - name: Rollback on Failure
-        if: failure()
+  production_deployment:
+    needs: canary_deployment
+    runs-on: self-hosted
+    steps:
+      - name: Checkout deployment repository
+        uses: actions/checkout@v3
+        with:
+          repository: soundn/gudlyf-task1-deploy
+          path: gudlyf-task1-deploy
+
+      - name: Deploy to Kubernetes (Production Deployment)
+        uses: tale/kubectl-action@v1
+        with:
+          base64-kube-config: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Set Namespace
         run: |
-          echo "Rolling back due to failed canary deployment"
-          CANARY_DEPLOYMENT=$(kubectl get deployments -o jsonpath='{.items[*].metadata.name}' | grep -o '\bcanary-[^ ]*')
-          if [ -n "$CANARY_DEPLOYMENT" ]; then
-            kubectl rollout undo deployment/$CANARY_DEPLOYMENT
-          else
-            echo "Error: Canary deployment not found, unable to rollback"
-          fi
-          exit 1
+          NAMESPACE="${{ github.event.inputs.environment || 'dev' }}"
+          echo "Using namespace: $NAMESPACE"
+          kubectl config set-context --current --namespace=$NAMESPACE
 
       - name: Promote to Production
-        if: success()
         working-directory: gudlyf-task1-deploy
         run: |
           echo "Canary deployment successful, promoting to production"
@@ -193,3 +191,12 @@ jobs:
             echo "Error: Neither k8s/service.yml nor k8s/service.yaml found"
             exit 1
           fi
+
+      - name: Monitor Production Deployment
+        run: |
+          PROD_DEPLOYMENT=$(kubectl get deployments -o jsonpath='{.items[*].metadata.name}' | grep -o '\bboardgame-deployment\b')
+          if [ -z "$PROD_DEPLOYMENT" ]; then
+            echo "Error: Production deployment not found"
+            exit 1
+          fi
+          kubectl rollout status deployment/$PROD_DEPLOYMENT --timeout=5m
