@@ -114,8 +114,12 @@ jobs:
           kubectl create namespace ${{ github.event.inputs.environment || 'default' }} || true
           kubectl config set-context --current --namespace=${{ github.event.inputs.environment || 'default' }}
 
+      - name: Checkout code
+        uses: actions/checkout@v2
+
       - name: Deploy Canary Version
         run: |
+          cd gudlyf-task1-deploy
           kubectl apply -f k8s/canary-deployment.yaml
 
       - name: Monitor Canary Deployment
@@ -143,4 +147,3 @@ jobs:
       - name: Deploy Services
         run: |
           kubectl apply -f k8s/service.yaml
-          
