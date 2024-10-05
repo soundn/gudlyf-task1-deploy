@@ -94,7 +94,20 @@ jobs:
         run: |
           docker push soundnw/testapp:latest
 
+      - name: Check AWS CLI installation
+        id: check-aws-cli
+        run: |
+          if command -v aws &> /dev/null; then
+            echo "AWS CLI is already installed"
+            aws --version
+            echo "aws_cli_installed=true" >> $GITHUB_OUTPUT
+          else
+            echo "AWS CLI is not installed"
+            echo "aws_cli_installed=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Install AWS CLI
+        if: steps.check-aws-cli.outputs.aws_cli_installed == 'false'
         run: |
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
           unzip awscliv2.zip
